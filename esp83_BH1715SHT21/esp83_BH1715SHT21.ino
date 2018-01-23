@@ -6,61 +6,78 @@ SimpleBLE ble;
 #define SHT21_SLAVE_ADDR 0x40 //7bit address
 #define SHT21_T_NOHOLD_CMD 0xF3
 #define SHT21_RH_NOHOLD_CMD 0xF5
-
-
+#define LPS331_SLABE_ADDR 0x5C 
 #define BH1715FVC_SLAVE_ADDR 0x23
+
 
 #define BH1715FVC_H_resolution_mode 0x20 // 1回測定
 #define BH1715FVC_Power_on 0x01
+#define LPS331_PRESS_OUT_XL   0x28
+#define LPS331_CTRL_REG1      0x20
 
 #define max_data_num 20
 #define tmp_err_range 5
-#define illuminance_err_range 250
+#define illuminance_err_range 350
 #define rh_err_range 5
+#define atm_err_range 10
 
 int i2c_read_sht21(byte command);
-int i2c_read_BH1715(byte Power_on,byte MODE); 
+int i2c_read_BH1715(byte Power_on,byte MODE);
+int32_t readPressureRaw(void); 
 
 float temperature_conversion();
 float relative_humidity_conversion();
 float illuminance_conversion();
+float readPressureMillibars(void);
 
 float get_SensorData(char sensor);
 float avr_SensorData_clalulation(char sensor, int err_range,int data_num,float*sen_data);
 
-void ble_send(String id,int sensor_data);
+
+void enableDefault(void);
+void writeReg(byte reg, byte value);
+
+void ble_send(String name,int value);
 
 void setup() {
   float tmp=0.0;
   float rh=0.0;
   float illuminance=0.0;
+  float atm=0.0;
   int up_data = 0;
   
   Wire.begin(21,22);//sda,scl
   Serial.begin(115200);
+  delay(1000);
+   enableDefault();
+   tmp=get_SensorData('T');
+   /*Serial.print("温度:");         //デバック用 
+   Serial.print((int)(tmp));
+   Serial.print("\n");*/
   
-  tmp=get_SensorData('T');
-  Serial.print("温度:"); 
-  Serial.print((int)(tmp));
-  Serial.print("\n");
-   
-  rh=get_SensorData('H');
-  Serial.print("相対湿度:"); 
-  Serial.print((int)(rh));
-  Serial.print("\n");
+  
+   rh=get_SensorData('H');
+   /*Serial.print("相対湿度:");    //デバック用 
+   Serial.print((int)(rh));
+   Serial.print("\n");*/
+  
+   illuminance=get_SensorData('I');
+   /*Serial.print("照度:");         //デバック用 
+   Serial.print((int)(illuminance));
+   Serial.print("\n");*/
 
-  illuminance=get_SensorData('I');
-  Serial.print("照度:"); 
-  Serial.print((int)(illuminance));
-  Serial.print("\n");
-   
-  for(up_data = 0;up_data<10;up_data++){
-     ble_send("AAA",(int)(tmp));
-     ble_send("BBB",(int)rh);
-     ble_send("CCC",(int)illuminance);
-     delay(10);
-  }
- 
+   atm = get_SensorData('A');
+   /*Serial.print("大気圧:");      //デバック用 
+   Serial.print((int)(atm));
+   Serial.print("\n");*/
+    
+   for(up_data = 0;up_data<10;up_data++){
+      ble_send("AAA",(int)(tmp));
+      ble_send("BBB",(int)(rh));
+      ble_send("CCC",(int)(illuminance));
+      ble_send("DDD",(int)(atm));  
+   }
+  
   
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
@@ -75,16 +92,16 @@ void loop() {
  Serial.println("good night!");
   delay(500);
 
-  esp_deep_sleep_enable_timer_wakeup(10 *60* 1000 * 1000);  // wakeup(restart) after 5 min
+  esp_deep_sleep_enable_timer_wakeup(5* 60 * 1000 * 1000);  // wakeup(restart) after 5min
   esp_deep_sleep_start();
   delay(500);
   Serial.println("now sleeping");  // ここは実行されない
   
 }
 
-void ble_send(String id,int sensor_data){
+void ble_send(String name,int value){
   int out_len;
-  String out = id+  String(sensor_data,DEC);
+  String out = name+  String(value,DEC);
   out_len =out.length();
   while(out_len != 12){
     out = out +'Z';
@@ -96,6 +113,59 @@ void ble_send(String id,int sensor_data){
   delay(100);
   
   }
+  // turns on sensor and enables continuous output
+void enableDefault(void)
+{
+  // active mode, 12.5 Hz output data rate
+  writeReg(LPS331_CTRL_REG1, 0b11100000);
+}
+byte readReg(byte reg)
+{
+  byte value;
+
+  Wire.beginTransmission(LPS331_SLABE_ADDR);
+  Wire.write(reg);
+  Wire.endTransmission(false); // restart
+  Wire.requestFrom(LPS331_SLABE_ADDR, (byte)1);
+  value = Wire.read();
+  Wire.endTransmission();
+
+  return value;
+}
+void writeReg(byte reg, byte value)
+{
+  Wire.beginTransmission(LPS331_SLABE_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
+
+
+// reads pressure in millibars (mbar)/hectopascals (hPa)
+float readPressureMillibars(void)
+{
+  return (float)readPressureRaw() / 4096;
+}
+
+// reads pressure and returns raw 24-bit sensor output
+int32_t readPressureRaw(void)
+{
+  Wire.beginTransmission(LPS331_SLABE_ADDR);
+  // assert MSB to enable register address auto-increment
+  Wire.write(LPS331_PRESS_OUT_XL | (1 << 7));
+  Wire.endTransmission();
+  Wire.requestFrom(LPS331_SLABE_ADDR, (byte)3);
+
+  while (Wire.available() < 3);
+
+  uint8_t pxl = Wire.read();
+  uint8_t pl = Wire.read();
+  uint8_t ph = Wire.read();
+   
+  // combine bytes
+  return (int32_t)(int8_t)ph << 16 | (uint16_t)pl << 8 | pxl;
+}
+
 /*------------------------------------------------------------------------
 i2c_read_sht21
 sht21の温度か相対湿度をi2c通信で読み出しを行い、
@@ -218,10 +288,13 @@ float get_SensorData(char sensor){      //sensor(T:温度I:照度 H:湿度)
      err_range = tmp_err_range; //10
     break;
     case 'I':
-     err_range = illuminance_err_range; //100
+     err_range = illuminance_err_range; //350
     break;
     case 'H':
      err_range = rh_err_range; //10
+    break;
+    case 'A':
+      err_range=atm_err_range;
     break;
     default:
            printf("NoSensor \n");
@@ -265,6 +338,11 @@ float avr_SensorData_clalulation(char sensor, int err_range,int data_num,float*s
       sensor_data[data_num] =relative_humidity_conversion();
      }
      break;
+    case 'A':
+      for(;data_num<max_data_num;data_num++){
+        sensor_data[data_num] =readPressureMillibars();
+       }
+    break;
   }
   for(num=0;num<max_data_num;num++){
     avr_sensor_data+=sensor_data[num];
