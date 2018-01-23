@@ -7,6 +7,7 @@ SimpleBLE ble;
 #define SHT21_T_NOHOLD_CMD 0xF3
 #define SHT21_RH_NOHOLD_CMD 0xF5
 
+
 #define BH1715FVC_SLAVE_ADDR 0x23
 
 #define BH1715FVC_H_resolution_mode 0x20 // 1回測定
@@ -27,7 +28,7 @@ float illuminance_conversion();
 float get_SensorData(char sensor);
 float avr_SensorData_clalulation(char sensor, int err_range,int data_num,float*sen_data);
 
-void ble_send(String name,int value);
+void ble_send(String id,int sensor_data);
 
 void setup() {
   float tmp=0.0;
@@ -37,25 +38,29 @@ void setup() {
   
   Wire.begin(21,22);//sda,scl
   Serial.begin(115200);
+  
+  tmp=get_SensorData('T');
+  Serial.print("温度:"); 
+  Serial.print((int)(tmp));
+  Serial.print("\n");
+   
+  rh=get_SensorData('H');
+  Serial.print("相対湿度:"); 
+  Serial.print((int)(rh));
+  Serial.print("\n");
+
+  illuminance=get_SensorData('I');
+  Serial.print("照度:"); 
+  Serial.print((int)(illuminance));
+  Serial.print("\n");
+   
   for(up_data = 0;up_data<10;up_data++){
-   tmp=get_SensorData('T');
-   Serial.print("温度:"); 
-   Serial.print((int)(tmp));
-   Serial.print("\n");
-   ble_send("AAA",(int)(tmp));
-  
-   rh=get_SensorData('H');
-   Serial.print("相対湿度:"); 
-   Serial.print((int)(rh));
-   Serial.print("\n");
-   ble_send("BBB",rh);
-  
-   illuminance=get_SensorData('I');
-   Serial.print("照度:"); 
-   Serial.print((int)(illuminance));
-   Serial.print("\n");
-   ble_send("CCC",illuminance);
+     ble_send("AAA",(int)(tmp));
+     ble_send("BBB",(int)rh);
+     ble_send("CCC",(int)illuminance);
+     delay(10);
   }
+ 
   
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
   esp_deep_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
@@ -70,16 +75,16 @@ void loop() {
  Serial.println("good night!");
   delay(500);
 
-  esp_deep_sleep_enable_timer_wakeup(5 * 1000 * 1000);  // wakeup(restart) after 10secs
+  esp_deep_sleep_enable_timer_wakeup(10 *60* 1000 * 1000);  // wakeup(restart) after 5 min
   esp_deep_sleep_start();
   delay(500);
   Serial.println("now sleeping");  // ここは実行されない
   
 }
 
-void ble_send(String name,int value){
+void ble_send(String id,int sensor_data){
   int out_len;
-  String out = name+  String(value,DEC);
+  String out = id+  String(sensor_data,DEC);
   out_len =out.length();
   while(out_len != 12){
     out = out +'Z';
